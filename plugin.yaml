@@ -1,6 +1,100 @@
+# POW Tracker — manifest v2 (catalog-submission hardening, 0.3.0).
+#
+# `capabilities:` lists the privileged host surfaces the plugin requests
+# (tools.override, llm.*, gateway.platform_actions). This plugin registers
+# none — register() registers no tools/hooks/middleware; its whole surface is
+# the dashboard block (api/entry/manifest) — so the list is empty on purpose
+# (rule 06: declared capabilities must match reality, nothing more or less).
 name: pow-tracker
-version: "0.2.0"
-description: Proof of Work tracker — timers, auto-capture and invoicing across all clients.
+version: "0.3.0"
+description: >-
+  Multi-client proof-of-work time tracking — live timers, file-activity
+  auto-capture, invoicing and per-client SQLite billing, in a dashboard
+  pane/tab backed by a FastAPI plugin API.
+
+author: BigBossRabbit
+license: MIT
+tags: [dashboard, time-tracking, invoicing, productivity]
+
+# Manifest v2 (file-format version; api_version is the runtime API
+# generation this plugin targets).
+manifest_version: 2
+api_version: 1
+
+# No privileged host capabilities are used (see the note above).
+capabilities: []
+
+# SemVer floor: built and validated against Hermes 0.22.6 (the v2 manifest
+# fields, config_schema and python_dependencies surface this plugin uses).
+# Never newer than the current release.
+requires_hermes: ">=0.22.6"
+
+# Python dependencies (floor = oldest API-compatible, upper bound pinned per
+# the dependency security policy). Ranges deliberately match the ranges the
+# Hermes core itself declares for these two on its supported Pythons, so a
+# resolution under the core constraints picks the same versions it already
+# has and no pin ever moves. reportlab (PDF invoices) stays an optional,
+# lazily-imported extra: /invoice.pdf answers 501-style HTTP 500 without it.
+python_dependencies:
+  - "fastapi>=0.104.0,<1"
+  - "pydantic>=2.0,<3"
+
+# Every deploy-specific value is a setting (Desktop: Settings → Plugins →
+# POW Tracker). Defaults are generic; nothing personal ships in the code.
+config_schema:
+  clients_root:
+    type: str
+    required: true
+    default: "~/Documents/Clients"
+    label: "Clients root"
+    description: >-
+      Root folder holding one sub-directory per tracked client. Each client
+      keeps its own SQLite time DB (`.pow-time/time.db`) inside its folder.
+      `~` is expanded. Read at plugin load — restart the gateway (or reload
+      the plugin) after saving.
+  legacy_clients_root:
+    type: str
+    default: ""
+    label: "Legacy clients root (migration)"
+    description: >-
+      Optional: a previous clients root to migrate the client registry from
+      (its `.pow-tracker/clients.db` is copied to the current clients root on
+      first run). Leave empty on a fresh install. A migrated client whose
+      folder already holds a pre-1.0 `.spd-time/time.db` keeps that DB in
+      place.
+  ignore_dirs:
+    type: list
+    default: [Docs, Archive, Research, Templates]
+    label: "Ignored folders"
+    description: >-
+      Organisational folders under the clients root that client
+      auto-discovery must ignore (they are not billable clients).
+  default_rate:
+    type: float
+    default: 100.0
+    label: "Default hourly rate"
+    description: >-
+      Rate (per hour, in the currency below) seeded into a new client's DB
+      the first time it is created. Each client's rate is then its own DB
+      setting, editable per client.
+  currency:
+    type: str
+    default: "USD"
+    label: "Currency"
+    description: >-
+      Currency label seeded into new client DBs and shown on amounts,
+      invoices and exports (existing per-client DB settings win).
+  company:
+    type: str
+    default: "My Company"
+    label: "Company name"
+    description: >-
+      Company name seeded into new client DBs and printed on invoices
+      (existing per-client DB settings win).
+
+# Dashboard-plugin registration (the web-dashboard host discovers
+# `dashboard/manifest.json`; this block is the declared registration of the
+# plugin's whole surface).
 dashboard:
   api: dashboard/plugin_api.py
   entry: dashboard/plugin.js

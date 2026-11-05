@@ -1,7 +1,7 @@
 /**
  * POW Tracker — Hermes desktop plugin pane (upgraded).
  *
- * Live time-tracking dashboard for Smart Polar Distributors. Dark theme,
+ * Live multi-client proof-of-work time tracking dashboard. Dark theme,
  * pulse/glow live dots, smooth area charts + per-task sparklines, per-entry
  * editing, invoice date-range picker, billable vs non-billable totals.
  *
@@ -125,8 +125,10 @@ function fmtDuration(s) {
 }
 
 function fmtMoney(n, cur) {
-  if (n == null || !isFinite(n)) return (cur || 'NAD') + ' 0.00'
-  return `${cur || 'NAD'} ${Number(n).toFixed(2)}`
+  // The currency label always comes from the backend settings (per-client DB,
+  // seeded from the `currency` plugin setting); never hardcoded.
+  if (n == null || !isFinite(n)) return (cur ? cur + ' ' : '') + '0.00'
+  return `${cur ? cur + ' ' : ''}${Number(n).toFixed(2)}`
 }
 
 function fmtClock(ts) {
@@ -150,12 +152,12 @@ const mono = 'font-mono tabular-nums'
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const CSS = [
-  '@keyframes spd-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }',
-  '@keyframes spd-fadeup { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
-  '@keyframes spd-draw { to { stroke-dashoffset: 0; } }',
-  '.spd-live { animation: spd-pulse 1.6s ease-in-out infinite; }',
-  '.spd-fadeup { animation: spd-fadeup 0.25s ease-out both; }',
-  '.spd-bar { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }'
+  '@keyframes pow-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }',
+  '@keyframes pow-fadeup { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
+  '@keyframes pow-draw { to { stroke-dashoffset: 0; } }',
+  '.pow-live { animation: pow-pulse 1.6s ease-in-out infinite; }',
+  '.pow-fadeup { animation: pow-fadeup 0.25s ease-out both; }',
+  '.pow-bar { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }'
 ].join('\n')
 
 function StyleTag() {
@@ -196,7 +198,7 @@ function AreaChart({ values, height = 90, color }) {
   }
   const area = `${d} L ${pts[pts.length - 1].x.toFixed(1)} ${(H - padBottom).toFixed(1)} L ${pts[0].x.toFixed(1)} ${(H - padBottom).toFixed(1)} Z`
   const last = pts[pts.length - 1]
-  const gid = 'spd-grad-' + Math.abs(values.length * 31 + H)
+  const gid = 'pow-grad-' + Math.abs(values.length * 31 + H)
   return jsxs('svg', {
     ref,
     viewBox: `0 0 ${w} ${H}`,
@@ -213,9 +215,9 @@ function AreaChart({ values, height = 90, color }) {
         d, fill: 'none', stroke: color, strokeWidth: 2,
         strokeLinecap: 'round', strokeLinejoin: 'round',
         pathLength: 1, style: { strokeDasharray: 1, strokeDashoffset: 1 },
-        className: 'spd-draw'
+        className: 'pow-draw'
       }),
-      jsx('circle', { cx: last.x, cy: last.y, r: 3.5, fill: color, className: 'spd-live' })
+      jsx('circle', { cx: last.x, cy: last.y, r: 3.5, fill: color, className: 'pow-live' })
     ]
   })
 }
@@ -235,7 +237,7 @@ function Sparkline({ values, color = 'var(--ui-accent)' }) {
 // ── Header chip ───────────────────────────────────────────────────────────────
 function LiveDot({ on, color }) {
   return jsx('span', {
-    className: cn('inline-block h-2 w-2 rounded-full', on && 'spd-live'),
+    className: cn('inline-block h-2 w-2 rounded-full', on && 'pow-live'),
     style: { backgroundColor: color, boxShadow: on ? `0 0 6px 1px ${color}aa` : undefined }
   })
 }
@@ -388,7 +390,7 @@ function RunningCard({ entry, rate, cur, onStop }) {
   }, [entry.start_ts])
   const amount = (tick / 3600) * (rate || 0)
   return jsxs('div', {
-    className: 'flex flex-col gap-2 rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-primary)/60 p-3 spd-fadeup',
+    className: 'flex flex-col gap-2 rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-primary)/60 p-3 pow-fadeup',
     style: { borderColor: '#f59e0b55' },
     children: [
       jsxs('div', { className: 'flex items-center justify-between', children: [
@@ -405,7 +407,7 @@ function RunningCard({ entry, rate, cur, onStop }) {
         onChange: (e) => setNote(e.target.value)
       }),
       jsxs('div', { className: 'flex items-center justify-between', children: [
-        jsx('span', { className: cn('text-[0.6875rem] text-(--ui-text-tertiary)', mono), children: fmtMoney(amount, cur || 'NAD') }),
+        jsx('span', { className: cn('text-[0.6875rem] text-(--ui-text-tertiary)', mono), children: fmtMoney(amount, cur) }),
         jsx(Button, { className: 'h-7', variant: 'default', onClick: () => onStop(entry.id, note), children: 'Stop & bill' })
       ] })
     ]
@@ -416,7 +418,7 @@ function RunningCard({ entry, rate, cur, onStop }) {
 function EntriesView({ ctx, state }) {
   const entries = (state && state.entries) || []
   const settings = (state && state.settings) || {}
-  const cur = settings.currency || 'NAD'
+  const cur = settings.currency || ''
   const resting = useValue($resting)
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState({})
@@ -520,7 +522,7 @@ function TasksView({ ctx, state }) {
   const tasks = (state && state.tasks) || []
   const entries = (state && state.entries) || []
   const rate = (state && state.rate_nad) || 0
-  const cur = ((state && state.settings) || {}).currency || 'NAD'
+  const cur = ((state && state.settings) || {}).currency || ''
   const resting = useValue($resting)
 
   async function archive(t) {
@@ -604,7 +606,7 @@ function InvoiceView({ ctx, state }) {
   const [inv, setInv] = useState(null)
   const [loadErr, setLoadErr] = useState('')
   const settings = (state && state.settings) || {}
-  const cur = settings.currency || 'NAD'
+  const cur = settings.currency || ''
   const [fromD, setFromD] = useState('')
   const [toD, setToD] = useState('')
 
@@ -839,7 +841,7 @@ function Pane({ ctx }) {
   ] })
 }
 
-export default {
+const plugin = {
   id: ID,
   name: 'POW Tracker',
   defaultEnabled: true,
@@ -878,8 +880,10 @@ export default {
   }
 }
 
+export default plugin
+
 
 // Self-register for Hermes dashboard
 if (typeof window !== 'undefined' && window.__HERMES_PLUGINS__) {
-  window.__HERMES_PLUGINS__.register('pow-tracker', default);
+  window.__HERMES_PLUGINS__.register('pow-tracker', plugin);
 }

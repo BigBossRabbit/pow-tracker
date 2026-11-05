@@ -6,6 +6,14 @@ Multi-client: each client gets its own SQLite DB under
 with the client folder. The active client is selected via /clients +
 /client; all task/entry/invoice routes operate on the active client's DB.
 
+Deploy-specific values (the clients root, the folders auto-discovery
+ignores, the rate/currency/company defaults seeded into per-client DBs,
+and an optional legacy clients root to migrate a registry from) are
+plugin settings — declared in `config_schema` in `plugin.yaml`, rendered
+by the Desktop's Settings → Plugins form, and read here from
+`plugins.entries.<plugin-id>.settings` with generic fallback defaults
+(see SETTING_DEFAULTS). No personal path or name is hardcoded.
+
 Entries are OPEN (timer running, end_ts NULL) or CLOSED (duration fixed).
 An optional background auto-capture thread opens/closes `auto` entries
 driven by folder activity in the active client's folder.
@@ -35,18 +43,84 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── Settings ──────────────────────────────────────────────────────────────────
+# Every deploy-specific value is a plugin setting declared in `config_schema`
+# (plugin.yaml) so the Desktop renders it under Settings → Plugins. Values live
+# under `plugins.entries.<plugin-id>.settings` in the active profile's
+# config.yaml and are read read-only via `load_config_readonly()` — the pattern
+# the plugin developer guide documents for a dashboard plugin's `plugin_api.py`
+# half. These generic defaults are the last fallback (fresh installs).
+# Settings are read once at plugin-mount time: saving a new value requires a
+# gateway restart (or plugin reload) to take effect.
+PLUGIN_ID = "pow-tracker"
+SETTING_DEFAULTS: dict = {
+    # Root folder holding one sub-directory per tracked client.
+    "clients_root": "~/Documents/Clients",
+    # Optional previous clients root to migrate an existing client registry
+    # from (empty on a fresh install). Migrated rows keep their recorded
+    # folder paths; a client whose folder holds a pre-1.0 data dir keeps its
+    # existing DB where it is.
+    "legacy_clients_root": "",
+    # Organisational folders under the clients root that the client
+    # auto-discovery must ignore (they are not billable clients).
+    "ignore_dirs": ["Docs", "Archive", "Research", "Templates"],
+    # Per-client DB seeding defaults: hourly rate, its currency label, and
+    # the company name printed on invoices.
+    "default_rate": 100.0,
+    "currency": "USD",
+    "company": "My Company",
+}
+# Mirrors the manifest `config_schema` types (a `float` setting accepts an int
+# too); anything else in config.yaml falls back to the generic default.
+_SETTING_TYPES: dict = {
+    "clients_root": (str,),
+    "legacy_clients_root": (str,),
+    "ignore_dirs": (list,),
+    "default_rate": (int, float),
+    "currency": (str,),
+    "company": (str,),
+}
+
+
+def _plugin_settings() -> dict:
+    """`plugins.entries.<plugin-id>.settings`, never mutated (read-only load)."""
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        cfg = load_config_readonly() or {}
+        entry = (cfg.get("plugins") or {}).get("entries", {}).get(PLUGIN_ID) or {}
+        settings = entry.get("settings") if isinstance(entry, dict) else None
+        return settings if isinstance(settings, dict) else {}
+    except Exception:  # pragma: no cover — running without a hermes config
+        return {}
+
+
+def _setting(key: str, default: Any = None, settings: Optional[dict] = None) -> Any:
+    """One plugin setting, type-guarded, with its generic fallback default."""
+    if default is None:
+        default = SETTING_DEFAULTS.get(key)
+    value = (settings if settings is not None else _plugin_settings()).get(key, default)
+    expected = _SETTING_TYPES.get(key)
+    if expected is None:
+        return value
+    # bool is an int subclass — never let True satisfy a float/int setting.
+    if isinstance(value, bool) and bool not in expected:
+        return default
+    if not isinstance(value, expected):
+        return default
+    return value
+
+
 # ── Storage ───────────────────────────────────────────────────────────────────
 CLIENTS_ROOT = Path(
-    "/Users/fromthejump/Documents/OKIN Ent/Clients"
-)
+    str(_setting("clients_root") or "~/Documents/Clients")
+).expanduser()
 REGISTRY_DB = CLIENTS_ROOT / ".pow-tracker" / "clients.db"
 DATA_SUBDIR = ".pow-time"
-
-# Legacy SPD data is adopted on first run so nothing is lost.
-LEGACY_SPD_DIR = Path(
-    "/Users/fromthejump/Documents/OKIN Ent/Clients/AI Clients/Smart Polar Distributors"
-)
-LEGACY_SPD_DB = LEGACY_SPD_DIR / ".spd-time" / "time.db"
+# A pre-1.0 data layout keeps a client's time DB under `.spd-time/`; those
+# existing DBs are adopted in place (found by existence), everything else
+# uses DATA_SUBDIR.
+LEGACY_DATA_SUBDIR = ".spd-time"
 
 # ── Tunables (named constants) ────────────────────────────────────────────────
 WS_QUEUE_MAX = 256                 # per-subscriber event backlog
@@ -138,14 +212,14 @@ def _reg_connect() -> sqlite3.Connection:
 
 
 def _init_registry() -> None:
-    """Create the client registry; adopt the legacy SPD DB on first run.
+    """Create the client registry.
 
     Also auto-discovers any subdirectory of CLIENTS_ROOT that isn't already
     registered, so manually added client folders (or folders created outside
     the plugin) appear in the desktop picker without a restart.
     """
-    # Migrate legacy registry DB from the old AI Clients/-relative path to the
-    # new Clients/-relative path if it exists at the old location.
+    # Migrate a registry DB from a previous clients root (the optional
+    # `legacy_clients_root` setting) if one is configured and exists.
     _migrate_legacy_registry()
 
     conn = _reg_connect()
@@ -163,25 +237,12 @@ def _init_registry() -> None:
             """
         )
         if not conn.execute("SELECT 1 FROM clients LIMIT 1").fetchone():
-            # Adopt legacy SPD data: point at its existing time.db.
-            if LEGACY_SPD_DB.exists():
-                conn.execute(
-                    "INSERT INTO clients(id, name, slug, folder, active, created_at) "
-                    "VALUES(?, ?, ?, ?, 1, ?)",
-                    (
-                        _new_id("cl"),
-                        "Smart Polar Distributors",
-                        "smart-polar-distributors",
-                        str(LEGACY_SPD_DIR),
-                        _now(),
-                    ),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO clients(id, name, slug, folder, active, created_at) "
-                    "VALUES(?, 'Default', 'default', ?, 1, ?)",
-                    (_new_id("cl"), str(CLIENTS_ROOT / "Default"), _now()),
-                )
+            # Fresh install: seed one default client under the clients root.
+            conn.execute(
+                "INSERT INTO clients(id, name, slug, folder, active, created_at) "
+                "VALUES(?, 'Default', 'default', ?, 1, ?)",
+                (_new_id("cl"), str(CLIENTS_ROOT / "Default"), _now()),
+            )
         elif not conn.execute("SELECT 1 FROM clients WHERE active=1").fetchone():
             first = conn.execute("SELECT id FROM clients ORDER BY created_at").fetchone()
             conn.execute("UPDATE clients SET active=1 WHERE id=?", (first["id"],))
@@ -194,16 +255,24 @@ def _init_registry() -> None:
         conn.close()
 
 
-def _migrate_legacy_registry() -> None:
-    """If the registry DB lived at the old (AI Clients/-relative) path, copy it
-    to the new (Clients/-relative) path so existing registrations (SPD, etc.)
-    survive the path expansion.
+def _legacy_root() -> Optional[Path]:
+    """The configured previous clients root (registry migration source), if any."""
+    raw = str(_setting("legacy_clients_root") or "").strip()
+    return Path(raw).expanduser() if raw else None
 
-    Also re-copies if the new DB exists but is empty (0 bytes) or has no tables —
+
+def _migrate_legacy_registry() -> None:
+    """If the registry DB lived at a previous clients root (the optional
+    `legacy_clients_root` setting), copy it to the current location so
+    existing registrations survive the clients-root move.
+
+    Also re-copies if the current DB exists but is empty (0 bytes) or has no tables —
     the gateway's boot-time file touch can create a stub before the plugin runs.
     """
-    old_root = LEGACY_SPD_DIR.parent  # .../AI Clients
-    old_db = old_root / ".pow-tracker" / "clients.db"
+    legacy_root = _legacy_root()
+    if legacy_root is None:
+        return
+    old_db = legacy_root / ".pow-tracker" / "clients.db"
     if not old_db.exists():
         return
     REGISTRY_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -240,29 +309,21 @@ def _discover_clients(conn: sqlite3.Connection) -> None:
     A directory qualifies if:
     - It is a direct child of CLIENTS_ROOT (one level deep).
     - Its name does not start with '.'.
-    - It is not a legacy container or organisational folder.
+    - It is not an organisational folder (the `ignore_dirs` setting).
     - It is not already present (by folder path) in the clients table.
     """
     existing = {
         row["folder"]
         for row in conn.execute("SELECT folder FROM clients").fetchall()
     }
-    # Legacy container (holds other clients) + organisational folders that are
-    # not billable clients.
-    skip_names = {
-        "AI Clients",          # legacy container
-        "Docs",                # shared docs folder, not a client
-        "Archive",             # cold archive
-        "Obsidian-Reports",    # symlink mirror, not a client
-        "General-Docs",        # shared OKIN docs
-        "Research",            # Kingpin prospecting
-        "FundGen",             # prospecting sub-tree
-    }
+    # Organisational folders under the clients root that are not billable
+    # clients (the `ignore_dirs` setting).
+    ignore_dirs = {str(d) for d in _setting("ignore_dirs") if str(d).strip()}
     try:
         children = [p for p in CLIENTS_ROOT.iterdir()
                     if p.is_dir()
                     and not p.name.startswith(".")
-                    and p.name not in skip_names]
+                    and p.name not in ignore_dirs]
     except OSError:
         return
     now = _now()
@@ -310,10 +371,7 @@ def _resolve_db(client_id: Optional[str] = None) -> tuple[sqlite3.Row, Path]:
             if not row:
                 raise HTTPException(500, "no active client")
         folder = Path(row["folder"])
-        db = folder / DATA_SUBDIR / "time.db"
-        # Legacy SPD DB keeps its original location so existing data is used as-is.
-        if str(folder) == str(LEGACY_SPD_DIR):
-            db = LEGACY_SPD_DB
+        db = _db_for_row(row, _folder=folder)
         return row, db
     finally:
         conn.close()
@@ -335,12 +393,14 @@ def _connect() -> sqlite3.Connection:
 
 
 def _db_for_row(row: sqlite3.Row, *, _folder: Optional[Path] = None) -> Path:
+    """A client's time DB: its folder's `.pow-time/time.db`, or the pre-1.0
+    `.spd-time/time.db` when that is what the folder already holds (legacy
+    data is adopted in place)."""
     folder = Path(row["folder"]) if _folder is None else _folder
-    db = folder / DATA_SUBDIR / "time.db"
-    # Legacy SPD DB keeps its original location so existing data is used as-is.
-    if str(folder) == str(LEGACY_SPD_DIR):
-        db = LEGACY_SPD_DB
-    return db
+    legacy_db = folder / LEGACY_DATA_SUBDIR / "time.db"
+    if legacy_db.exists():
+        return legacy_db
+    return folder / DATA_SUBDIR / "time.db"
 
 
 def _all_clients() -> list[sqlite3.Row]:
@@ -393,9 +453,9 @@ def _ensure_db(db: Path) -> None:
                 """
             )
             defaults = {
-                "rate_nad": "2450.0",
-                "currency": "NAD",
-                "company": "OKIN Ent",
+                "rate_nad": str(_setting("default_rate")),
+                "currency": str(_setting("currency")),
+                "company": str(_setting("company")),
                 "client": db.parent.parent.stem,
                 "auto_capture": "1",
                 "auto_task_id": "",
@@ -602,7 +662,8 @@ async def create_client(body: ClientCreate):
             """
         )
         for k, v in {
-            "rate_nad": "0", "currency": "NAD", "company": "OKIN Ent",
+            "rate_nad": str(_setting("default_rate")), "currency": str(_setting("currency")),
+            "company": str(_setting("company")),
             "client": name, "auto_capture": "0", "auto_task_id": "",
             "auto_idle_s": str(int(AUTO_IDLE_DEFAULT_S)),
         }.items():
@@ -1006,9 +1067,9 @@ async def get_invoice(
                 "amount_nad": amount,
             })
         return {
-            "currency": settings.get("currency", "NAD"),
-            "company": settings.get("company", ""),
-            "client": settings.get("client", ""),
+            "currency": settings.get("currency") or str(_setting("currency")),
+            "company": settings.get("company") or str(_setting("company")),
+            "client": settings.get("client") or "",
             "from_ts": from_ts,
             "to_ts": to_ts,
             "rate_nad": rate,
@@ -1478,4 +1539,4 @@ try:
     _init_db()
     start_auto_capture()
 except Exception as exc:  # pragma: no cover
-    log.warning("SPD time tracker init failed: %s", exc)
+    log.warning("POW Tracker init failed: %s", exc)
