@@ -1,0 +1,24 @@
+# Python bytecode / caches (R17: never ship these)
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# macOS junk (R17)
+.DS_Store
+._*
+.AppleDouble/
+
+# Editor / sync noise
+.last_sync*
+*.swp
+*~
+.vscode/
+.idea/
+
+# Logs and local data (never part of the shipped tree)
+logs/
+*.log
+*.db

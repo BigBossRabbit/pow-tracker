@@ -1,0 +1,13 @@
+{
+    "name": "pow-tracker",
+    "label": "POW Tracker",
+    "description": "Proof of Work tracker — timers, auto-capture and invoicing across all clients.",
+    "icon": "Clock",
+    "version": "0.2.0",
+    "api": "plugin_api.py",
+    "entry": "plugin.js",
+    "tab": {
+        "path": "/pow-tracker",
+        "hidden": false
+    }
+}
