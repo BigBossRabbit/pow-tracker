@@ -24,6 +24,7 @@ hermes venv), e.g.::
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import os
 import sqlite3
@@ -35,6 +36,10 @@ from unittest import mock
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 API_FILE = PLUGIN_ROOT / "dashboard" / "plugin_api.py"
+
+
+def _read_api() -> str:
+    return API_FILE.read_text(encoding="utf-8")
 
 MODULE_NAME = "pow_tracker_plugin_api_under_test"
 
@@ -337,6 +342,88 @@ class SettingsOverrideTests(unittest.TestCase):
         self.assertEqual(
             api._db_for_row({"folder": str(fresh)}),
             fresh / ".pow-time" / "time.db")
+
+
+class _FakeWS:
+    """Just the WebSocket surface the auth gate touches."""
+
+    def __init__(self, params=None):
+        self.query_params = params or {}
+        self.headers = {}
+        self.client = None
+        self.closed = None
+
+    async def close(self, code=1000, reason=""):
+        self.closed = code
+
+    async def accept(self):
+        return None
+
+
+class WebSocketAuthGate(unittest.TestCase):
+    """/events refuses an upgrade with no (or a bad) credential, before accept.
+
+    The pane reads client names and time entries, so an unauthenticated local
+    process must not get the stream: the upgrade is checked with the dashboard's
+    canonical WS gate and refused with 4401.
+    """
+
+    def test_auth_check_precedes_accept_in_source(self):
+        # Structural, hermes-free: the check must gate the accept, not follow it.
+        src = _read_api()
+        body = src.split("async def events_ws(ws: WebSocket):", 1)
+        self.assertEqual(len(body), 2, "events_ws handler missing")
+        handler = body[1]
+        check = handler.index("_ws_upgrade_authorized(ws)")
+        accept = handler.index("await ws.accept()")
+        self.assertLess(check, accept, "credential must be checked before ws.accept()")
+        self.assertIn("_WS_AUTH_REFUSED = 4401", src)
+        self.assertIn("close(code=_WS_AUTH_REFUSED)", src)
+
+    @unittest.skipUnless(
+        HAVE_HERMES,
+        "hermes_cli/fastapi/pydantic not importable (run under the hermes venv)")
+    def test_no_credential_is_refused_4401(self):
+        api = self._api()
+        ws = _FakeWS()
+        asyncio.run(api.events_ws(ws))
+        self.assertEqual(ws.closed, 4401)
+
+    @unittest.skipUnless(
+        HAVE_HERMES,
+        "hermes_cli/fastapi/pydantic not importable (run under the hermes venv)")
+    def test_wrong_token_is_refused_4401(self):
+        api = self._api()
+        ws = _FakeWS({"token": "not-the-token"})
+        with mock.patch("hermes_cli.web_server._SESSION_TOKEN", "the-real-token"):
+            asyncio.run(api.events_ws(ws))
+        self.assertEqual(ws.closed, 4401)
+
+    @unittest.skipUnless(
+        HAVE_HERMES,
+        "hermes_cli/fastapi/pydantic not importable (run under the hermes venv)")
+    def test_matching_token_is_accepted(self):
+        api = self._api()
+        ws = _FakeWS({"token": "the-real-token"})
+        from hermes_cli.web_server import app
+        with mock.patch("hermes_cli.web_server._SESSION_TOKEN", "the-real-token"), \
+                mock.patch.object(app.state, "auth_required", False, create=True):
+            self.assertTrue(api._ws_upgrade_authorized(ws))
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _api(self):
+        tmp = tempfile.TemporaryDirectory(prefix="pow-ws-test-")
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name) / "home"
+        home.mkdir(parents=True)
+        api = _load_api({}, home=home)
+        self.addCleanup(lambda: _stop_patchers(api))
+        try:
+            api._AUTO_STOP.set()
+        except Exception:
+            pass
+        return api
 
 
 if __name__ == "__main__":

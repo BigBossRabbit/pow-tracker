@@ -46,6 +46,11 @@ What a user would want to know before installing (catalog rule 13):
 - **No network calls, no telemetry, no credentials.** The plugin makes no
   outbound network requests of any kind, collects no usage data, and uses,
   stores or reads no secrets.
+- **The live events socket is authenticated.** `/events` checks the dashboard
+  credential on the upgrade (the same gate the core dashboard sockets use) and
+  refuses an unauthenticated local process with close code 4401 before it
+  accepts — client names and time entries are never served to an anonymous
+  connection. It is a read-only stream; writes stay on the ordinary REST routes.
 
 **No client data ships with the plugin.** The tree contains only source;
 there are no databases, exports or client names in the repository.

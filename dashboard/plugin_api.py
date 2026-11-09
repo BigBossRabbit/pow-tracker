@@ -1513,8 +1513,34 @@ def start_auto_capture() -> None:
 
 
 # ── Live events WebSocket ─────────────────────────────────────────────────────
+def _ws_upgrade_authorized(ws: WebSocket) -> bool:
+    """Authorize a WS upgrade with the dashboard's canonical gate.
+
+    Browsers cannot set an ``Authorization`` header on an upgrade, so the
+    credential rides the query string (``?ticket=`` in gated mode, ``?token=``
+    in loopback) and is judged by the same core check every bundled dashboard
+    socket uses (``web_server_chat._ws_auth_ok``) — this route cannot drift from
+    it. Accepts when the dashboard isn't importable (bare-FastAPI harness).
+    """
+    try:
+        from hermes_cli import web_server_chat as _ws_auth
+    except Exception:  # pragma: no cover - bare-FastAPI harness
+        return True
+    return bool(_ws_auth._ws_auth_ok(ws))
+
+
+# Close code a refused upgrade gets: distinct from a normal disconnect, and the
+# same one the core socket gates use for a bad credential.
+_WS_AUTH_REFUSED = 4401
+
+
 @router.websocket("/events")
 async def events_ws(ws: WebSocket):
+    # Credential first: nothing is accepted (and no snapshot is built) for an
+    # unauthenticated local process. The client is closed, never crashed.
+    if not _ws_upgrade_authorized(ws):
+        await ws.close(code=_WS_AUTH_REFUSED)
+        return
     await ws.accept()
     _set_main_loop(asyncio.get_running_loop())
     q: asyncio.Queue = asyncio.Queue(maxsize=WS_QUEUE_MAX)
