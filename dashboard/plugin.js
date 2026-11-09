@@ -1,7 +1,7 @@
 /**
  * POW Tracker — Hermes web-dashboard plugin tab.
  *
- * Plain IIFE, no build step, no ESM. The web dashboard injects this file with a
+ * Plain IIFE, no build step, no ESM. The web dashboard injects this file with
  * a plain script tag (web/src/plugins/usePlugins.ts) and a bundle registers
  * its tab component through `window.__HERMES_PLUGINS__.register(name, Component)`.
  * React, the UI primitives and the auth helpers all come from
