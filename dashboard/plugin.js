@@ -868,8 +868,8 @@
 
       jsxs('div', { className: 'flex items-center justify-between rounded-md bg-(--ui-bg-primary)/40 px-3 py-2', children: [
         jsxs('div', { children: [
-          jsxs('span', { className: 'text-xs font-medium', children: ['Auto-capture from folder',
-            jsx('span', { className: 'ml-1.5 text-[0.625rem] text-(--ui-text-tertiary)', children: auto ? 'on' : 'off (default)' }) ] }),
+          jsxs('span', { className: 'text-xs font-medium', children: ['Auto-capture from folder', ' ',
+            jsx('span', { className: 'ml-0.5 text-[0.625rem] text-(--ui-text-tertiary)', children: auto ? 'on' : 'off (default)' }) ] }),
           jsx('div', { className: 'text-[0.625rem] text-(--ui-text-tertiary)', children: 'Open timer on client folder activity' })
         ] }),
         jsx(Switch, { checked: auto, onCheckedChange: (v) => { setAuto(v); setTimeout(() => patchSettings({ auto_capture: v }), 0) } })
