@@ -1,4 +1,4 @@
-# POW Tracker — manifest v2 (catalog-submission hardening, 0.3.0).
+# POW Tracker — manifest v2 (catalog-submission hardening, 0.3.1).
 #
 # `capabilities:` lists the privileged host surfaces the plugin requests
 # (tools.override, llm.*, gateway.platform_actions). This plugin registers
@@ -6,7 +6,7 @@
 # the dashboard block (api/entry/manifest) — so the list is empty on purpose
 # (rule 06: declared capabilities must match reality, nothing more or less).
 name: pow-tracker
-version: "0.3.0"
+version: "0.3.1"
 description: >-
   Multi-client proof-of-work time tracking — live timers, file-activity
   auto-capture, invoicing and per-client SQLite billing, in a dashboard

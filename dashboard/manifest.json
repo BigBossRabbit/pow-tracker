@@ -3,7 +3,7 @@
     "label": "POW Tracker",
     "description": "Multi-client proof-of-work time tracking — timers, file-activity auto-capture, invoicing and per-client SQLite billing.",
     "icon": "Clock",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "api": "plugin_api.py",
     "entry": "plugin.js",
     "tab": {

@@ -176,7 +176,7 @@ class GenericDefaultsGate(unittest.TestCase):
 
     def test_manifest_version_and_version(self):
         text = _read(PLUGIN_ROOT / "plugin.yaml")
-        self.assertIn('version: "0.3.0"', text)
+        self.assertIn('version: "0.3.1"', text)
         self.assertIn("manifest_version: 2", text)
         self.assertIn('requires_hermes: ">=0.22.6"', text)
         self.assertIn("capabilities: []", text)
@@ -215,7 +215,7 @@ class GenericDefaultsGate(unittest.TestCase):
         import json
 
         data = json.loads(_read(PLUGIN_ROOT / "dashboard" / "manifest.json"))
-        self.assertEqual(data["version"], "0.3.0")
+        self.assertEqual(data["version"], "0.3.1")
         self.assertEqual(data["name"], "pow-tracker")
         self.assertEqual(data["api"], "plugin_api.py")
         self.assertEqual(data["entry"], "plugin.js")
