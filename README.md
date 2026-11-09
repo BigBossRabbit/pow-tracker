@@ -31,11 +31,14 @@ primitives and the auth helpers, and registers itself through
 
 What a user would want to know before installing (catalog rule 13):
 
-- **Watches a configurable clients-root folder.** The auto-capture feature
-  walks the configured `clients_root` tree (file **mtimes** only — file
-  names and contents are never read, recorded or sent anywhere) to open and
-  close time entries on folder activity. The folders it walks can be limited
-  per client via the client DB's own settings.
+- **Watches a configurable clients-root folder — only when switched on.** The
+  auto-capture feature walks the configured `clients_root` tree (file **mtimes**
+  only — file names and contents are never read, recorded or sent anywhere) to
+  open and close time entries on folder activity. **It is off by default, per
+  client:** every client — whether created in the UI or discovered as a folder —
+  starts with `auto_capture` off, and is switched on per client in the plugin's
+  Rate tab. The folders it walks can be limited per client via the client DB's
+  own settings.
 - **Runs a background capture thread.** A daemon thread inside the
   dashboard/gateway process polls every few seconds while the plugin is
   loaded. It can be switched off per client (each client DB's
@@ -79,12 +82,19 @@ Per-client behaviour (rate/currency/company, auto-capture on/off + idle
 window, the default auto-capture task) is stored **per client** in that
 client's own DB `settings` table and edited from the plugin's Rate tab.
 
+**Auto-capture is per client and OFF by default.** A newly created client —
+and equally a folder that client auto-discovery registered as a client — is
+seeded with `auto_capture = "0"`. Switch it on per client in the Rate tab; that
+toggle is the consent gesture. A client with capture off still tracks manual
+timers normally.
+
 ## How a client folder is found
 
 - The client registry is `<clients-root>/.pow-tracker/clients.db`.
 - Any sub-directory of the clients root that is not ignored (`ignore_dirs`)
   or hidden (leading `.`) is auto-registered as a client; creating a client
-  from the UI makes `<clients-root>/<slug>/`.
+  from the UI makes `<clients-root>/<slug>/`. Discovered folders arrive with
+  auto-capture off (see above).
 - Each client's time DB is `<client folder>/.pow-time/time.db`.
 
 ## Dependencies

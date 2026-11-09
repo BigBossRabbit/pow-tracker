@@ -276,6 +276,43 @@ class SettingsOverrideTests(unittest.TestCase):
         self.assertEqual(seeded["company"], "Test Company")
         self.assertEqual(seeded["client"], "Default")
 
+    # ── auto-capture consent default ─────────────────────────────────────────
+
+    def test_created_client_seeds_auto_capture_off(self):
+        api = _load_api(self._config(), home=self.home)
+        asyncio.run(api.create_client(api.ClientCreate(name="Fresh Client")))
+        db = self.clients / "fresh-client" / ".pow-time" / "time.db"
+        self.assertTrue(db.is_file())
+        conn = sqlite3.connect(str(db))
+        try:
+            seeded = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+        finally:
+            conn.close()
+        self.assertEqual(seeded["auto_capture"], "0")
+
+    def test_discovered_client_seeds_auto_capture_off(self):
+        # A folder dropped into the clients root is registered by discovery and
+        # must arrive with capture OFF too (the privacy-safe default), never on.
+        api = _load_api(self._config(), home=self.home)
+        (self.clients / "Dropped In").mkdir(parents=True)
+        conn = api._reg_connect()
+        try:
+            api._discover_clients(conn)
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM clients WHERE slug='dropped-in'").fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(row, "discovery must register the folder")
+        db = api._db_for_row(row)
+        api._ensure_db(db)
+        conn = sqlite3.connect(str(db))
+        try:
+            seeded = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+        finally:
+            conn.close()
+        self.assertEqual(seeded["auto_capture"], "0")
+
     # ── legacy migration (generic) ────────────────────────────────────────────
 
     def test_legacy_clients_root_migrates_registry(self):

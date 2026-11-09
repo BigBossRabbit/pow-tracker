@@ -457,7 +457,10 @@ def _ensure_db(db: Path) -> None:
                 "currency": str(_setting("currency")),
                 "company": str(_setting("company")),
                 "client": db.parent.parent.stem,
-                "auto_capture": "1",
+                # Auto-capture is opt-in per client: a folder that was merely
+                # discovered (or created) starts OFF, and the user turns it on
+                # per client in the Rate tab. Same seed as create_client.
+                "auto_capture": "0",
                 "auto_task_id": "",
                 "auto_idle_s": str(int(AUTO_IDLE_DEFAULT_S)),
             }
