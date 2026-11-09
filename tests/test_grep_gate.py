@@ -257,26 +257,44 @@ class DesktopSurfaceGate(unittest.TestCase):
         for token in JS_FORBIDDEN_TOKENS:
             self.assertNotIn(token, js, f"plugin.js uses forbidden {token!r}")
 
-    def test_only_sdk_react_static_imports(self):
+    def test_web_bundle_dialect(self):
+        """The web dashboard loads this file with a plain <script src>: it must
+        be an IIFE that registers through window.__HERMES_PLUGINS__.register —
+        not ESM (a bare `import`/`export default` cannot execute there) — and it
+        must carry zero Desktop-SDK bridge calls."""
         js = _read(PLUGIN_ROOT / "dashboard" / "plugin.js")
+        self.assertRegex(js, r"(?m)^\(function \(\) \{", "plugin.js must open as an IIFE")
+        self.assertRegex(js, r"REGISTRY\.register\(ID, Pane\)",
+                         "plugin.js must register its tab through the web registry")
+        self.assertIn("window.__HERMES_PLUGINS__", js)
+        self.assertIn("window.__HERMES_PLUGIN_SDK__", js)
         for line in js.splitlines():
             stripped = line.strip()
-            if stripped.startswith("import ") and " from " in stripped:
-                spec = stripped.split(" from ", 1)[1].strip().strip("';\"")
-                self.assertIn(
-                    spec, ("@hermes/plugin-sdk", "react", "react/jsx-runtime"),
-                    f"plugin.js imports non-SDK specifier {spec!r}",
-                )
+            self.assertFalse(stripped.startswith("import "),
+                             f"ESM import in a plain-<script> bundle: {stripped[:60]}")
+            self.assertFalse(stripped.startswith("export "),
+                             f"ESM export in a plain-<script> bundle: {stripped[:60]}")
+        self.assertNotIn("hermesDesktop", js,
+                         "the Desktop bridge does not exist in the web host")
+        self.assertNotIn("getConnection(", js)
+        # A missing host/global must be a silent no-op, never a throw.
+        self.assertRegex(js, r"if \(!SDK \|\| !REGISTRY")
 
-    def test_no_bare_default_reference(self):
-        """The old `register('pow-tracker', default)` tail was a SyntaxError
-        (bare `default` is not a valid identifier); the default export is a
-        named const now."""
+    def test_export_uses_authed_fetch_and_blob(self):
+        """Exports go through the plugin's own route with the host's auth helper,
+        then a Blob — never a connection token in a URL."""
         js = _read(PLUGIN_ROOT / "dashboard" / "plugin.js")
-        self.assertNotIn(", default)", js)
-        self.assertRegex(js, r"const plugin = \{")
-        self.assertRegex(js, r"export default plugin")
-        self.assertRegex(js, r"register\('pow-tracker', plugin\)")
+        self.assertIn("SDK.authedFetch(BASE + path)", js)
+        self.assertIn("createObjectURL", js)
+        self.assertIn("a.download", js)
+        self.assertNotIn("?token=", js)
+
+    def test_socket_uses_host_ws_url_builder(self):
+        """Sockets take their auth param from the host (ticket in gated mode,
+        token in loopback) instead of hand-assembling a URL."""
+        js = _read(PLUGIN_ROOT / "dashboard" / "plugin.js")
+        self.assertIn("SDK.buildWsUrl(BASE + path)", js)
+        self.assertIn("new WebSocket(url)", js)
 
 
 class CleanTreeGate(unittest.TestCase):

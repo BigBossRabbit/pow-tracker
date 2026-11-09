@@ -13,12 +13,19 @@ background auto-capture thread watches client folders and opens/closes
 with per-entry rate overrides, exportable as CSV (and as PDF when the
 optional `reportlab` dependency is installed).
 
-- **Dashboard UI** — a pane/tab (`dashboard/plugin.js`) with the track /
-  entries / tasks / invoice / rate views, live updates over a WebSocket.
+- **Dashboard UI** — a dashboard tab (`dashboard/plugin.js`), loaded by the web
+  dashboard as a plain script and registered through its plugin registry, with
+  the track / entries / tasks / invoice / rate views and live updates over a
+  WebSocket.
 - **Backend API** — a FastAPI router (`dashboard/plugin_api.py`) mounted at
   `/api/plugins/pow-tracker/` by the dashboard plugin system.
 - **Plugin root** — `__init__.py` with a pass-only `register(ctx)`; the
   plugin registers no tools, hooks or middleware.
+
+The tab is a web-dashboard bundle: a plain IIFE, no build step, no ESM. It uses
+only the host plugin SDK (`window.__HERMES_PLUGIN_SDK__`) for React, the UI
+primitives and the auth helpers, and registers itself through
+`window.__HERMES_PLUGINS__.register`. It makes no Desktop-SDK bridge calls.
 
 ## Disclosure
 
