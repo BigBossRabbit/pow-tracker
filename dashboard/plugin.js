@@ -213,7 +213,17 @@
 
   // Exports: authenticated fetch (the host's active auth mode) → Blob → anchor.
   // The response is the plugin's own route, so no connection token is read and
-  // none appears in a URL.
+  // none appears in a URL. The server's Content-Disposition filename wins, so a
+  // download keeps the name the backend chose.
+  function filenameFrom(resp, fallback) {
+    try {
+      const cd = resp.headers.get('Content-Disposition') || ''
+      const m = /filename="?([^";]+)"?/i.exec(cd)
+      if (m && m[1]) return m[1]
+    } catch { /* noop */ }
+    return fallback
+  }
+
   async function saveExport(path, filename) {
     const resp = await SDK.authedFetch(BASE + path)
     if (!resp.ok) {
@@ -225,7 +235,7 @@
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = filename
+    a.download = filenameFrom(resp, filename)
     document.documentElement.appendChild(a)
     a.click()
     document.documentElement.removeChild(a)

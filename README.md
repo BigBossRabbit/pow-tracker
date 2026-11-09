@@ -46,6 +46,9 @@ What a user would want to know before installing (catalog rule 13):
 - **No network calls, no telemetry, no credentials.** The plugin makes no
   outbound network requests of any kind, collects no usage data, and uses,
   stores or reads no secrets.
+- **Exports download through an authenticated fetch.** Invoice PDF/CSV and the
+  full entry CSV are fetched with the host's own auth helper and saved from a
+  Blob, so no connection token is ever placed in a URL (previously it was).
 - **The live events socket is authenticated.** `/events` checks the dashboard
   credential on the upgrade (the same gate the core dashboard sockets use) and
   refuses an unauthenticated local process with close code 4401 before it
